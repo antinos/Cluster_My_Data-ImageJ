@@ -1,5 +1,5 @@
 # Cluster My Data (v0.0.1)
-*version release date:07/10/10*
+*version release date:07/10/20*
 
 This is an ImageJ/Fiji plugin for data clustering. It uses an awesome java library 'clust4j' [(github repo)](https://github.com/tgsmith61591/clust4j) made by Taylor G Smith (and distributed under an Apache licence!).
 
