@@ -20,6 +20,8 @@ import java.util.Random;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.math3.linear.Array2DRowRealMatrix;
 
+import com.clust4j.algo.AffinityPropagation;
+import com.clust4j.algo.AffinityPropagationParameters;
 import com.clust4j.algo.DBSCAN;
 import com.clust4j.algo.DBSCANParameters;
 import com.clust4j.algo.HDBSCAN;
@@ -28,8 +30,12 @@ import com.clust4j.algo.KMeans;
 //import com.clust4j.data.DataSet;
 //import com.clust4j.data.ExampleDataSets;
 import com.clust4j.algo.KMeansParameters;
+import com.clust4j.algo.KMedoids;
+import com.clust4j.algo.KMedoidsParameters;
+import com.clust4j.metrics.pairwise.Distance;
+import com.clust4j.metrics.pairwise.GeometricallySeparable;
 
-/**version 0.0.1*/
+/**version 0.0.2*/
 
 /**
  * Clustering algorithm library 'clust4j' created by Taylor G Smith (https://github.com/tgsmith61591/clust4j) and distributed under the Apache License 2.0.
@@ -44,17 +50,38 @@ public class Cluster_My_Data implements PlugIn {
     // Options to use during the run. Defaults for some but otherwise populated when parseOptions() is called.
     //private String inputFolderPath;
     private String inputIndexPath; //show the plugin where sample labels are located.. used to colour the final output.
+    private String metric; //distance metric/measure, used to compute the distance, or dissimilarity, between pairs of observations.
+    private GeometricallySeparable metric_dist;
+    //
     private boolean hdbscan;
     private String minClusSize;	//HDBSCAN parameter
     private String minPoints; //HDBSCAN + DBSCAN parameter
     private int minCS; //HDBSCAN minimum Cluster Size (optional) variable. 
     private int minP; //Minimum points. The larger the value, the more points will be declared as noise, and clusters will be restricted to progressively more dense areas. Defaults to minCS.
+    //
     private String kmeans;
+    private String kmedoids;
     private int K; //k-means k
+    //
     private boolean dbscan;
     private String epsilon;
     private double eps; //How close points should be to each other to be considered a part of a cluster. If the distance between two points is less than or equal to eps, these points are considered neighbours.
+    //
+    private boolean affprop; // Affinity Propagation. GENERAL NOTE: this algorithm is quite slow for large datasets and has a tendency to find a high number of clusters with the default settings.
+    private String dampFactor;
+    private String iterBreak;
+    private String maxIter;
+    private double dampFac; //0.5-1
+    private int itBreak; //The number of stagnant iterations after which the algorithm will declare convergence. Must be over 0.
+    private int maxIt; //The max iterations. Must be over 0.
+    
+		//damping factor (between 0.5 and 1)	default=0.5				setDampingFactor
+		//iterBreak (over 0)					default=15				setIterBreak			Number of stagnant iters after which to break (The number of stagnant iterations after which the algorithm will declare convergence)
+		//maxIter (over 0)						default=200				setMaxIter				The max iterations
+		//metric														setMetric				Looks like it should work
+    //
     private boolean outputCSV = false; //create a CSV copy of the tSNE 2D output on the users desktop.
+    boolean resultWin = false; //flag to set if a results window is open at the start of the run.
     
     // Variables and main() method for testing in IDEs.
     private static String debugOptions = null;
@@ -68,8 +95,6 @@ public class Cluster_My_Data implements PlugIn {
     public void run(String arg) {
         // Fill in the options we'll use during this run.
         parseOptions();
-        	//IJ.log("ParseOptions: minClusSize = "+minClusSize);
-        	//IJ.log("ParseOptions: minPoints = "+minPoints);
         
         String[] titles = WindowManager.getNonImageTitles();
         if (!ArrayUtils.contains(titles, "Plot Values")) {
@@ -86,6 +111,10 @@ public class Cluster_My_Data implements PlugIn {
 	        IJ.log(""+test);
 	        */
         //There must be a way to get data from a non-results table using the IJ api.... maybe via a TextPanel, but I couldn't immediately see how. I'll let the macro rename our 'Plot Values' table to 'Results' so that I can use the Analyzer class instead.
+        if (IJ.isResultsWindow()) {
+        	 IJ.runMacro("Table.rename(\"Results\", \"Results_1\");"); //if a results table exists, change its name so that we don't destroy it.
+        	 resultWin = true;
+        }
         IJ.runMacro("selectWindow(\"Plot Values\")");
         IJ.runMacro("Table.rename(\"Plot Values\", \"Results\");");
         ResultsTable rt = Analyzer.getResultsTable();
@@ -120,6 +149,9 @@ public class Cluster_My_Data implements PlugIn {
         }
         
         IJ.runMacro("Table.rename(\"Results\", \"Plot Values\");");
+        if (resultWin) {
+        	IJ.runMacro("Table.rename(\"Results_1\", \"Results\");");
+        }
         
         double[][] Y = new double[xArray.length][2]; //possibly needs to be [xArray.length][2]
         for (int k=0; k<xArray.length; k++) {
@@ -208,6 +240,38 @@ public class Cluster_My_Data implements PlugIn {
         	}
         }
         
+        //If affinity-propagation clustering is specified, use it to populate the labelsArray
+        if (affprop) {
+        	final Array2DRowRealMatrix Ymatrix = new Array2DRowRealMatrix(Y);
+        	if (dampFactor != null && !("").equals(dampFactor) && !dampFactor.matches(".*[A-Za-z].*") && Double.valueOf(dampFactor) >= 0.5 && Double.valueOf(dampFactor) <= 1) {
+        		dampFac = (double) Double.valueOf(dampFactor);
+        			//IJ.log("dampFac has been set to "+dampFac);
+        	} else {
+        		dampFac = AffinityPropagation.DEF_DAMPING; //default = 0.5
+        			//IJ.log("dampFac has been set to DEF_DAMPING, which = "+String.valueOf(AffinityPropagation.DEF_DAMPING));
+        	}
+        	if (iterBreak != null && !("").equals(iterBreak) && !iterBreak.matches(".*[A-Za-z].*") && Integer.valueOf(iterBreak) > 0) {
+        		itBreak = (int) Integer.valueOf(iterBreak);
+        			//IJ.log("itBreak has been set to "+itBreak);
+        	} else {
+        		itBreak = AffinityPropagation.DEF_ITER_BREAK; //default = 15
+        			//IJ.log("itBreak has been set to DEF_ITER_BREAK, which = "+String.valueOf(AffinityPropagation.DEF_ITER_BREAK));
+        	}
+        	if (maxIter != null && !("").equals(maxIter) && !maxIter.matches(".*[A-Za-z].*") && Integer.valueOf(maxIter) > 0) {
+        		maxIt = (int) Integer.valueOf(maxIter);
+        			//IJ.log("maxIt has been set to "+maxIt);
+        	} else {
+        		maxIt = AffinityPropagation.DEF_MAX_ITER; //default = 200
+        			//IJ.log("maxIt has been set to DEF_MAX_ITER, which = "+String.valueOf(AffinityPropagation.DEF_MAX_ITER));
+        	}
+        	AffinityPropagation ap = new AffinityPropagationParameters().setDampingFactor(dampFac).setIterBreak(itBreak).setMaxIter(maxIt).setMetric(metric_dist).fitNewModel(Ymatrix);
+        	final int[] apresult = ap.getLabels();
+        	labelsArray = new String[apresult.length];	
+        	for (int i=0; i<apresult.length; i++) {
+        		labelsArray[i] = String.valueOf(apresult[i]);
+        	}
+        }
+        
       //If k-means clustering is specified, use it to populate the labelsArray
         if (kmeans != "") {
         	K = (int) Integer.valueOf(kmeans);
@@ -217,6 +281,18 @@ public class Cluster_My_Data implements PlugIn {
         	labelsArray = new String[kmresult.length];
         	for (int i=0; i<kmresult.length; i++) {
         		labelsArray[i] = String.valueOf(kmresult[i]);
+        	}
+        }
+        
+        //If k-medoids clustering is specified, use it to populate the labelsArray //TO DO.. check if an optional parameters can be passed for this
+        if (kmedoids != "") {
+        	K = (int) Integer.valueOf(kmedoids);
+        	final Array2DRowRealMatrix Ymatrix = new Array2DRowRealMatrix(Y);
+        	KMedoids kmed = new KMedoidsParameters(K).fitNewModel(Ymatrix);
+        	final int[] kmedresult = kmed.getLabels();
+        	labelsArray = new String[kmedresult.length];
+        	for (int i=0; i<kmedresult.length; i++) {
+        		labelsArray[i] = String.valueOf(kmedresult[i]);
         	}
         }
         
@@ -244,11 +320,15 @@ public class Cluster_My_Data implements PlugIn {
         */
         String plotTitle = new String("Plot (uncoloured)");
         if (kmeans != "" && labelsArray.length == Y.length) {
-        	plotTitle = "Plot coloured by kMeans (k="+kmeans+")";
+        	plotTitle = "Plot coloured by k-means (k = "+kmeans+")";
+        } else if (kmedoids != "" && labelsArray.length == Y.length) {
+        	plotTitle = "Plot coloured by K-medoids (k = "+kmedoids+")";
         } else if (hdbscan && labelsArray.length == Y.length) {
-        	plotTitle = "Plot coloured by HDBSCAN (min cluster size="+minClusSize+", min points="+minPoints+")";
+        	plotTitle = "Plot coloured by HDBSCAN (min cluster size = "+minClusSize+", min points = "+minPoints+")";
         } else if (epsilon != "" && labelsArray.length == Y.length) {
-        	plotTitle = "Plot coloured by DBSCAN (epsilon="+String.valueOf(eps)+", min points="+minPoints+")";
+        	plotTitle = "Plot coloured by DBSCAN (epsilon = "+String.valueOf(eps)+", min points = "+minPoints+")";
+        } else if (affprop && labelsArray.length == Y.length) {
+        	plotTitle = "Plot coloured by affinity-propagation (damping factor = "+String.valueOf(dampFac)+", metric = "+metric_dist.getName()+")";
         } else {
         	//do nothing to the title
         }
@@ -402,27 +482,108 @@ public class Cluster_My_Data implements PlugIn {
         // Path to sample labels.
         inputIndexPath = Macro.getValue(optionsStr, "label_path", "");
         
+        // Distance metric used to compute dissimilarity between pars of observations (an option for: affinity propagation and possibly most other algorithms) 
+        metric = Macro.getValue(optionsStr, "metric", "euclidean");
+    	if (metric != "euclidean") {
+    		if (metric == "manhattan") {
+    			metric_dist = Distance.MANHATTAN;
+    		}
+    		else if (metric == "chebyshev") {
+    			metric_dist = Distance.CHEBYSHEV;
+    		}
+    		/*
+    		else if (metric == "minkowski") {
+    			//metric_dist = Distance.MINKOWSKI(p); //need to look into the passed double value
+    		}
+    		*/
+    		else if (metric == "canberra") {
+    			metric_dist = Distance.CANBERRA;
+    		}
+    		else if (metric == "braycurtis") {
+    			metric_dist = Distance.BRAY_CURTIS;
+    		}
+    		/*
+    		else if (metric == "cosine") {
+    			//metric_dist = Distance.
+    		}
+    		else if (metric == "correlation") {
+    			//metric_dist = Distance.
+    		}
+    		else if (metric == "haversine") {
+    			//metric_dist = Distance.
+    		}
+    		*/
+    		else if (metric == "hamming") {
+    			metric_dist = Distance.HAMMING;
+    		}
+    		/*
+    		else if (metric == "jaccard") {
+    			//metric_dist = Distance.
+    		}
+    		*/
+    		else if (metric == "dice") {
+    			metric_dist = Distance.DICE;
+    		}
+    		else if (metric == "russelrao") {
+    			metric_dist = Distance.RUSSELL_RAO;
+    		}
+    		else if (metric == "kulsinski") {
+    			metric_dist = Distance.KULSINSKI;
+    		}
+    		else if (metric == "rogerstanimoto") {
+    			metric_dist = Distance.ROGERS_TANIMOTO;
+    		}
+    		/*
+    		else if (metric == "sokalmichener") {
+    			//metric_dist = Distance.
+    		}
+    		*/
+    		else if (metric == "sokalsneath") {
+    			metric_dist = Distance.SOKAL_SNEATH;
+    		}
+    		else if (metric == "yule") {
+    			metric_dist = Distance.YULE;
+    		}
+		} else {
+			metric_dist = Distance.EUCLIDEAN;
+		}
+        
         // Figure out if we want to do hdbscan clustering on the 2d data.
         hdbscan = optionsStr.contains("hdbscan");
         
-        // Retrieve a hdbscan Minimum Cluster Size.
-        minClusSize = Macro.getValue(optionsStr, "min_clus_size", "");
-        
-        // Retrieve a (h)dbscan Minimum Points value.
-        minPoints = Macro.getValue(optionsStr, "min_points", "");
+	        // Retrieve a hdbscan Minimum Cluster Size.
+	        minClusSize = Macro.getValue(optionsStr, "min_clus_size", "");
+	        
+	        // Retrieve a (h)dbscan Minimum Points value.
+	        minPoints = Macro.getValue(optionsStr, "min_points", "");
         
         // Figure out if we want to do k-means clustering and retrieve the value of k.
         kmeans = Macro.getValue(optionsStr, "k_means", "");
         
+        // Figure out if we want to do k-means clustering and retrieve the value of k.
+        kmedoids = Macro.getValue(optionsStr, "k_medoids", "");
+        
         // Figure out if we want to do dbscan clustering on the 2d data.
         dbscan = optionsStr.contains("dbscan");
         
-        // Retrieve a dbscan epsilon value.
-        epsilon = Macro.getValue(optionsStr, "epsilon", "");
+	        // Retrieve a dbscan epsilon value.
+	        epsilon = Macro.getValue(optionsStr, "epsilon", "");
+        
+        // Figure out if we want to do dbscan clustering on the 2d data.
+        affprop = optionsStr.contains("affinity_prop");
 
+	        // Affinity propagation damping factor (range: 0.5-1)
+	        dampFactor = Macro.getValue(optionsStr, "damping_factor", "");
+	        
+	        // The number of stagnant iterations after which the algorithm will declare convergence [affinity propagation]
+	        iterBreak = Macro.getValue(optionsStr, "iterations_break", "");
+	        
+	        // The max iterations [affinity propagation]
+	        maxIter = Macro.getValue(optionsStr, "max_iterations", "");
+        
         // See if a CSV output is requested.
         outputCSV = optionsStr.contains("output_csv");
-
+        
     }
     
     //Example method implementation of dbscan.

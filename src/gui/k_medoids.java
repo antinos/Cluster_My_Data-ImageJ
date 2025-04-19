@@ -11,18 +11,18 @@ import javax.swing.JTextField;
 
 import ij.IJ;
 
-public class k_means {
+public class k_medoids {
 	private String K;
 	boolean cancelled;
 	
-	public k_means() {
+	public k_medoids() {
 		optionsSelect();
 		if (cancelled) {
 			return;
 		}
 		
 		if (K != null && !("").equals(K) && !K.matches(".*[A-Za-z].*") && Integer.valueOf(K) > 0){
-			IJ.run("Cluster My Data", "k_means="+K);
+			IJ.run("Cluster My Data", "k_medoids="+K);
 		} else {
 			IJ.showMessage("k should be a whole number over 0.");
 			return;
@@ -40,7 +40,7 @@ public class k_means {
 		      
 		      constraints.gridx = 0;
 		      constraints.gridy = 0;
-		      panel.add(new JLabel("K-means 'k':"), constraints);
+		      panel.add(new JLabel("K-medoids 'k':"), constraints);
 		      
 		      constraints.gridx = 1;
 		      panel.add(k, constraints);
@@ -59,12 +59,13 @@ public class k_means {
 		      	//panel.add(new JLabel("The larger the value, the more points will be declared as noise, and clusters will be restricted to progressively more dense areas."));
 		      
 
-		      int result = JOptionPane.showConfirmDialog(null, panel, "Optionally enter K-means parameters", JOptionPane.OK_CANCEL_OPTION);
+		      int result = JOptionPane.showConfirmDialog(null, panel, "Enter K-medoid parameters", JOptionPane.OK_CANCEL_OPTION);
 		      if (result == JOptionPane.OK_OPTION) {
 		    	  K = k.getText();
 		      } else if (result == JOptionPane.CANCEL_OPTION) {
 		    	  cancelled = true;
 		      }
-		   }
-	
+	   
+	   }
+	    
 }
